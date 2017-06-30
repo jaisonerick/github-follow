@@ -8,10 +8,118 @@ require 'time_difference'
 
 HEADER = { Accept: 'application/vnd.github.inertia-preview+json' }
 
-Octokit.auto_paginate = true
+class GithubInfo
+  attr_reader :client
 
-client = Octokit::Client.new(netrc: true)
+  def initialize
+    @client = Octokit::Client.new(netrc: true)
+  end
 
+  def closed_prs(repository)
+    Enumerator.new do |y|
+      closed_pulls = client.pull_requests(repository, state: :closed)
+
+      loop do
+        break if closed_pulls.count.zero?
+
+        closed_pulls.each do |pull|
+          y << pull
+        end
+
+        closed_pulls = client.last_response.rels[:next].get.data
+      end
+    end
+  end
+
+  def pr_reviews(repository, pr_number)
+    Enumerator.new do |y|
+      reviews = client.pull_request_reviews(repository, pr_number, headers: HEADER)
+
+      loop do
+        break if reviews.count.zero?
+
+        reviews.each do |review|
+          y << review
+        end
+
+        reviews = client.last_response.rels[:next].get.data
+      end
+    end
+  end
+
+  def last_week_prs(repository)
+    prs = client.pull_requests(repository, state: :open)
+    closed_prs(repository).each do |pull|
+      break if pull.closed_at < Time.now - 7 * 86_000
+
+      prs << pull
+    end
+
+    prs
+  end
+
+  def last_week_opened_prs(repository)
+    prs = client.pull_requests(repository, state: :open).select { |pr| pr.created_at >= Time.now - 7 * 86_000 }
+    closed_prs(repository).each do |pull|
+      break if pull.created_at < Time.now - 7 * 86_000
+
+      prs << pull
+    end
+
+    prs
+  end
+
+  def last_week_closed_prs(repository)
+    prs = []
+
+    closed_prs(repository).each do |pull|
+      break if pull.closed_at < Time.now - 7 * 86_000
+
+      prs << pull
+    end
+
+    prs
+  end
+
+  def avg_closing_time(repository)
+    days = last_week_closed_prs(repository).map { |pr| days = (pr.closed_at - pr.created_at) / 86_000 }
+    days.inject(&:+).to_f / days.count
+  end
+
+  def first_reviews(repository)
+    last_week_prs(repository).map do |pr|
+      first_approved = nil
+      first_rejected = nil
+
+      client.pull_request_reviews(repository, pr.number).each do |review|
+        if review.state === 'APPROVED' && first_approved == nil
+          first_approved = review
+        end
+
+        if review.state === 'REQUEST_CHANGES'
+          first_rejected = review
+          break
+        end
+      end
+
+      { pr: pr, review: first_rejected ? first_rejected : first_approved }
+    end
+  end
+end
+
+=begin
+
+Ultimos 7  dias:
+
+- Quantos PR abertos
+- Quantos fechados
+- Tempo médio de fechamento
+- PR por tag
+- Tempo médio para o primeiro review (primeiro review negativo, se não existir, primeiro positivo)
+- Merge de PR sem review
+- Reviews por pessoa
+
+=end
 
 =begin
 projects = client.org_projects('sumoners', headers: HEADER)
@@ -33,30 +141,34 @@ projects.each do |project|
 end
 =end
 
+
+
 REPO_LIST = ['bonuz-api', 'companion-backend', 'companion-desktop', 'companion-pdv']
 
-REPO_LIST.each do |repository_name|
-  open_pulls = client.pull_requests("sumoners/#{repository_name}", state: :open)
+client = GithubInfo.new
 
+=begin
+REPO_LIST.each do |repository_name|
   puts "@#{repository_name}"
 
-  if open_pulls.length > 0
-    puts ' --- OPEN --- '
+  prs = client.last_week_prs("sumoners/#{repository_name}")
+  prs.group_by(&:state).each do |(state, list)|
+    if state == 'open'
+      puts ' --- OPEN --- '
 
-    open_pulls.each do |pull|
-      days = (Time.now - pull.created_at) / 86_000
-      printf("   (%s) %.2f days - %s\n", pull.user.login, days, pull.title)
+      list.each do |pr|
+        days = (Time.now - pr.created_at) / 86_000
+        printf("   (%s) %.2f days - %s\n", pr.user.login, days, pr.title)
+      end
     end
   end
-
-  puts ' --- LAST ACTIVITY --- '
-
-  closed_pulls = client.pull_requests("sumoners/#{repository_name}", state: :closed)
-  closed_pulls.each do |pull|
-    break if pull.closed_at < Time.now - 30 * 86_000
-
-    days = (pull.closed_at - pull.created_at) / 86_000
-    printf("   (%s) %.2f days - %s\n", pull.user.login, days, pull.title)
-  end
 end
+=end
+
+times = REPO_LIST.map { |repo| client.first_reviews("sumoners/#{repo}") }
+                 .flatten
+                 .reject { |item| item[:review].nil? }
+                 .map { |item| (item[:review].submitted_at - item[:pr].created_at) / 3_600 }
+
+printf("AVG FIRST REVIEW TIME: %.4f\n", times.inject(&:+) / times.count)
 
