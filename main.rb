@@ -5,8 +5,41 @@ require 'netrc'
 require 'octokit'
 require 'pry'
 require 'time_difference'
+require 'circleci'
 
 HEADER = { Accept: 'application/vnd.github.inertia-preview+json' }
+
+CircleCi.configure do |config|
+  config.token = ENV['CIRCLECI_TOKEN']
+end
+
+class CircleCiInfo
+  def coverage_info(build)
+    build = CircleCi::Build.new build['username'], build['reponame'], nil, build['build_num']
+    res = build.get.body
+
+    spec = res["steps"].detect { |step| step["name"] == "bin/rake spec" }
+    spec = res["steps"].detect { |step| step["name"] == "bin/rake" } unless spec
+    binding.pry unless spec
+    output_url = spec["actions"].first["output_url"]
+
+    content = JSON.parse(Net::HTTP.get(URI.parse(output_url)))
+    matches = content.first["message"].match(/(\d+) \/ (\d+) LOC/)
+
+    { covered: matches[1].to_i, total: matches[2].to_i }
+  end
+  
+  def last_build_for_repo(repo_full_name, branch: nil)
+    username, reponame = repo_full_name.split('/')
+
+    project = CircleCi::Project.new username, reponame
+    if branch
+      res = project.recent_builds_branch(branch).body.first
+    else
+      res = project.recent_builds(limit: 1).body.first
+    end
+  end
+end
 
 class GithubInfo
   attr_reader :client
@@ -143,7 +176,24 @@ end
 
 
 
-REPO_LIST = ['bonuz-api', 'companion-backend', 'companion-desktop', 'companion-pdv']
+REPO_LIST = ['bonuz-api', 'companion-backend', 'companion-pdv']
+
+circle = CircleCiInfo.new
+
+coverage = REPO_LIST.inject({ covered: 0, total: 0 }) do |sum, repo|
+  last_build = circle.last_build_for_repo("sumoners/#{repo}", branch: 'master')
+  unless last_build
+    puts "Repo didn't build: #{repo}"
+    next sum
+  end
+  coverage = circle.coverage_info(last_build)
+  sum[:covered] += coverage[:covered]
+  sum[:total] += coverage[:total]
+  sum
+end
+
+printf("Total coverage: %.2f%%\n", coverage[:covered].to_f / coverage[:total] * 100)
+exit
 
 client = GithubInfo.new
 

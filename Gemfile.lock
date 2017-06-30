@@ -8,6 +8,7 @@ GEM
       tzinfo (~> 1.1)
     addressable (2.5.1)
       public_suffix (~> 2.0, >= 2.0.2)
+    circleci (2.0.0)
     coderay (1.1.1)
     concurrent-ruby (1.0.5)
     faraday (0.12.1)
@@ -38,10 +39,11 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
+  circleci
   netrc
   octokit (~> 4.0)
   pry
   time_difference
 
 BUNDLED WITH
-   1.14.6
+   1.15.1

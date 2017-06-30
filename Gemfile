@@ -6,4 +6,5 @@ gem "octokit", "~> 4.0"
 gem "netrc"
 gem "pry"
 gem "time_difference"
+gem "circleci"
 
