@@ -13,6 +13,10 @@ CircleCi.configure do |config|
   config.token = ENV['CIRCLECI_TOKEN']
 end
 
+unless ENV['CIRCLECI_TOKEN']
+  fail 'Must set CIRCLECI_TOKEN'
+end
+
 class CircleCiInfo
   def coverage_info(build)
     build = CircleCi::Build.new build['username'], build['reponame'], nil, build['build_num']
@@ -176,7 +180,7 @@ end
 
 
 
-REPO_LIST = ['bonuz-api', 'companion-backend', 'companion-pdv']
+REPO_LIST = ['bonuz-api', 'companion-backend']
 
 circle = CircleCiInfo.new
 
@@ -192,8 +196,7 @@ coverage = REPO_LIST.inject({ covered: 0, total: 0 }) do |sum, repo|
   sum
 end
 
-printf("Total coverage: %.2f%%\n", coverage[:covered].to_f / coverage[:total] * 100)
-exit
+printf("Total coverage: %.2f%% (covered: %d, total: %d)\n", coverage[:covered].to_f / coverage[:total] * 100, coverage[:covered], coverage[:total])
 
 client = GithubInfo.new
 
